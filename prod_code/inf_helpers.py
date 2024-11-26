@@ -32,7 +32,7 @@ class TLEVisualizer:
         plt.ylabel('Loss')
         plt.grid(True)
         plt.legend()
-        plt.savefig(os.path.join(plot_save_dir, f'TRAIN_trainingloss_{norad_id}.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(plot_save_dir, f'INF_trainingloss_{norad_id}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
     @staticmethod
@@ -44,11 +44,11 @@ class TLEVisualizer:
         plt.figure(figsize=figsize)
         sns.boxplot(data=reconstruction_errors)
         plt.xticks(range(len(feature_names)), feature_names, rotation=45, ha='right')
-        plt.title(f'Training Distribution of Reconstruction Errors by Feature {norad_id}')
+        plt.title(f'Inference Distribution of Reconstruction Errors by Feature {norad_id}')
         plt.xlabel('Feature')
         plt.ylabel('Reconstruction Error')
         plt.tight_layout()
-        plt.savefig(os.path.join(plot_save_dir, f'TRAIN_reconstruction_errors_{norad_id}.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(plot_save_dir, f'INF_reconstruction_errors_{norad_id}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
     @classmethod
@@ -78,12 +78,12 @@ class TLEVisualizer:
                 yticklabels=time_labels,
                 cmap='RdYlBu_r',
                 center=0)
-        plt.title(f'Training Anomaly Z-Scores Heatmap {norad_id}')
+        plt.title(f'Inference Anomaly Z-Scores Heatmap {norad_id}')
         plt.xlabel('Feature')
         plt.ylabel('Timestamp')
         plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
-        plt.savefig(os.path.join(plot_save_dir, f'TRAIN_anom_heatmap_{norad_id}.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(plot_save_dir, f'INF_anom_heatmap_{norad_id}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
     @staticmethod
@@ -126,9 +126,9 @@ class TLEVisualizer:
             
             plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
         
-        plt.suptitle(f'Training Feature Timeline with Anomalies {norad_id}')
+        plt.suptitle(f'Inference Feature Timeline with Anomalies {norad_id}')
         plt.tight_layout()
-        plt.savefig(os.path.join(plot_save_dir, f'TRAIN_feat_timeline_{norad_id}.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(plot_save_dir, f'INF_feat_timeline_{norad_id}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
     @classmethod
@@ -161,7 +161,7 @@ class TLEVisualizer:
         ax2 = fig.add_subplot(gs[0, 1:])
         sns.boxplot(data=anomaly_details['reconstruction_errors'], ax=ax2)
         ax2.set_xticklabels(feature_names, rotation=45, ha='right')
-        ax2.set_title(f'Training Reconstruction Error Distribution {norad_id}')
+        ax2.set_title(f'Inference Reconstruction Error Distribution {norad_id}')
         ax2.grid(True, alpha=0.3)
         
         #Anomaly Timeline
@@ -171,7 +171,7 @@ class TLEVisualizer:
         if np.any(anomalies):
             ax3.plot(timestamps[anomalies], np.ones(np.sum(anomalies)), 'r.',
                     label='Anomaly', alpha=0.7, markersize=6)
-        ax3.set_title(f'Training Anomaly Timeline {norad_id}')
+        ax3.set_title(f'Inference Anomaly Timeline {norad_id}')
         ax3.set_ylabel('Anomaly (1) / Normal (0)')
         ax3.set_xlabel('Time')
         ax3.xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
@@ -185,12 +185,12 @@ class TLEVisualizer:
         ax4.bar(range(len(feature_names)), feature_anomaly_counts)
         ax4.set_xticks(range(len(feature_names)))
         ax4.set_xticklabels(feature_names, rotation=45, ha='right')
-        ax4.set_title(f'Training Anomalies per Feature {norad_id}')
+        ax4.set_title(f'Inference Anomalies per Feature {norad_id}')
         ax4.set_ylabel('Count')
         ax4.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(plot_save_dir, f'TRAIN_summary_{norad_id}.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(plot_save_dir, f'INF_summary_{norad_id}.png'), dpi=300, bbox_inches='tight')
         #plt.show()
 
 #################################################################

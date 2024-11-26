@@ -29,12 +29,8 @@ from inf_helpers import *
 #
 ##########################################################################################################
 
-
-import warnings
-warnings.filterwarnings('ignore')
-
 type_nm = 'inference' # inference or combat
-refire = False 
+refire = True 
 
 df = pd.read_parquet(f'/homes/dkurtenb/projects/russat/output/MODEL_{type_nm}_tle_data.parquet')
 
@@ -67,28 +63,30 @@ def build_anom_model(NORAD_ID_NUM, type_nm):
     return orb_df, detector, anomalies, explanations, samp_df   
 
 unique_ids = df['NORAD_CAT_ID'].unique()
-total_sats = len(unique_ids)
+
+models = os.listdir("/homes/dkurtenb/projects/russat/output/anomaly_model")
+model_id = list(set({int(m.split("_")[0].strip("'\"")) for m in models}))
+common_ids = list(set(unique_ids) & set(model_id))
+
 
 all_orbital_features = ['inclination', 'ra_of_asc_node', 'eccentricity', 'arg_of_perigee', 'mean_anomaly', 'mean_motion']
 anom_columns = [f'anom_{feat}' for feat in all_orbital_features]
 
-###############################################################################################################################################################
-files = os.listdir("/homes/dkurtenb/projects/russat/output/{type_nm}_plots")
-
-trained = list({int(f.split("_")[-1].strip("'\"")) for f in files})
-sat = df['NORAD_CAT_ID'].unique().tolist()
-
-sats_to_train = list(set(sat) - set(trained))
-
-sats_to_train.insert(0,28908)
-###############################################################################################################################################################
-
 all_dfs = []
 
 if refire:
+    files = os.listdir("/homes/dkurtenb/projects/russat/output/{type_nm}_plots")
+    trained = list({int(f.split("_")[-1].strip("'\"")) for f in files})
+    sats_to_train = list(set(common_ids) - set(trained))
+    
+    sats_to_train.insert(0,)
+
     id_lst = sats_to_train
+
 else:
-    id_lst = unique_ids
+    id_lst = common_ids
+
+total_sats = len(id_lst)
 
 for count, x in enumerate(id_lst, 1):
     print(f'\n\n\nWorking on space object number {x}\n\n\n')
