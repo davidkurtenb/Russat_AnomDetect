@@ -1,0 +1,4 @@
+*.parquet
+CARLA/
+__pycache__/
+*.pyc
