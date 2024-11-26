@@ -24,7 +24,8 @@ from inf_helpers import *
 
 ##########################################################################################################
 #
-#                                      COMBAT
+#                                      INFERENCE/COMBAT 
+#                                 CHANGE type_nm and refire
 #
 ##########################################################################################################
 
@@ -32,22 +33,25 @@ from inf_helpers import *
 import warnings
 warnings.filterwarnings('ignore')
 
-df = pd.read_parquet('/homes/dkurtenb/projects/russat/output/MODEL_combat_tle_data.parquet')
+type_nm = 'inference' # inference or combat
+refire = False 
 
-def build_anom_model(NORAD_ID_NUM, type):
+df = pd.read_parquet(f'/homes/dkurtenb/projects/russat/output/MODEL_{type_nm}_tle_data.parquet')
+
+def build_anom_model(NORAD_ID_NUM, type_nm):
     
     if torch.cuda.is_available():
         torch.cuda.empty_cache() 
         torch.backends.cudnn.benchmark = True
     
-    os.makedirs(f"/homes/dkurtenb/projects/russat/output/{type}_plots/plots_{type}_{NORAD_ID_NUM}", exist_ok=True)
+    os.makedirs(f"/homes/dkurtenb/projects/russat/output/{type_nm}_plots/plots_{type_nm}_{NORAD_ID_NUM}", exist_ok=True)
 
     samp_df = df[df['NORAD_CAT_ID']==NORAD_ID_NUM]
     samp_df = samp_df.sort_values(by='datetime', ascending=False)
     orb_df = samp_df[['datetime','inclination','ra_of_asc_node', 'eccentricity', 'arg_of_perigee', 'mean_anomaly', 'mean_motion']]
     orb_df = orb_df.set_index('datetime', drop = True)
     
-    plot_save_dir = f"/homes/dkurtenb/projects/russat/output/{type}_plots/plots_{type}_{NORAD_ID_NUM}"
+    plot_save_dir = f"/homes/dkurtenb/projects/russat/output/{type_nm}_plots/plots_{type_nm}_{NORAD_ID_NUM}"
     
     feature_names = list(orb_df)
     
@@ -68,57 +72,60 @@ total_sats = len(unique_ids)
 all_orbital_features = ['inclination', 'ra_of_asc_node', 'eccentricity', 'arg_of_perigee', 'mean_anomaly', 'mean_motion']
 anom_columns = [f'anom_{feat}' for feat in all_orbital_features]
 
-type_nm = 'combat'
+###############################################################################################################################################################
+files = os.listdir("/homes/dkurtenb/projects/russat/output/{type_nm}_plots")
+
+trained = list({int(f.split("_")[-1].strip("'\"")) for f in files})
+sat = df['NORAD_CAT_ID'].unique().tolist()
+
+sats_to_train = list(set(sat) - set(trained))
+
+sats_to_train.insert(0,28908)
+###############################################################################################################################################################
 
 all_dfs = []
 
-for count, x in enumerate(unique_ids, 1):
-    orb_df, detector, anomalies, explanations, samp_df = build_anom_model(x,type_nm)
+if refire:
+    id_lst = sats_to_train
+else:
+    id_lst = unique_ids
+
+for count, x in enumerate(id_lst, 1):
+    print(f'\n\n\nWorking on space object number {x}\n\n\n')
+    orb_df, detector, anomalies, explanations, samp_df = build_anom_model(x, type_nm)
     
-    anom_dict = {exp['sample_index']: [feat['feature'] for feat in exp['anomalous_features']] for exp in explanations}  
+    anom_dict = {exp['sample_index']: [feat['feature'] for feat in exp['anomalous_features']] for exp in explanations}    
 
     full_df = samp_df.copy(deep=False)
     full_df.reset_index(inplace=True, drop = True)
 
-    all_features = set().union(*[set(features) for features in anom_dict.values()]) 
+    all_features = set().union(*[set(features) for features in anom_dict.values()])  
     
     anom_df = pd.DataFrame(0, 
                         index=anom_dict.keys(),
                         columns=anom_columns)
 
-
     for key, features in anom_dict.items():
         anom_df.loc[key, [f'anom_{feat}' for feat in features]] = 1
-    
 
     full_df = full_df.join(anom_df, how='left')
 
     for col in anom_columns:
         if col not in full_df.columns:
             full_df[col] = 0
-
+    
     full_df['anom_count'] = full_df.filter(like='anom_').sum(axis=1)
     full_df = full_df.fillna(0)
 
-    all_dfs.append(full_df)
-
-    if count % 100 == 0:  # Adjust this number based on your memory constraints
-        intermediate_df = pd.concat(all_dfs, ignore_index=True)
-        intermediate_df.to_parquet(f'/homes/dkurtenb/projects/russat/output/anom_df_{type_nm}_all_sats_intermediate.parquet')
-        all_dfs = [intermediate_df]
-
+    mode = 'w' if count == 1 else 'a'
+    header = count == 1
+    full_df.to_csv(f'/homes/dkurtenb/projects/russat/output/anom_df_{type_nm}_all_sats_0.csv', mode=mode, header=header, index=False)
+    
     progress = count/df['NORAD_CAT_ID'].nunique()*100
     print(f"\nModel number {count} out of {df['NORAD_CAT_ID'].nunique()} complete. Progress: {progress:.3f}% done\n")
-    
+
     del full_df, orb_df, detector, anomalies, explanations, samp_df
     del anom_df, anom_dict
+
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-
-final_df = pd.concat(all_dfs, ignore_index=True)
-final_df.to_parquet(f'/homes/dkurtenb/projects/russat/output/anom_df_{type_nm}_all_sats.parquet')
-
-import os
-intermediate_file = f'/homes/dkurtenb/projects/russat/output/anom_df_{type_nm}_all_sats_intermediate.parquet'
-if os.path.exists(intermediate_file):
-    os.remove(intermediate_file)
