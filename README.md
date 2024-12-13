@@ -18,7 +18,6 @@ Our analysis includes:
   - XYZ coordinates
   - SatCat information
   - UCS data
-- `model_test_train.parquet`: Complete dataset including outlier information
 
 ### Directories
 - `/output`: Testing and build output directory
