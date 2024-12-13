@@ -12,6 +12,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.dates import DateFormatter
 from typing import List, Dict, Tuple
 import torch.nn.functional as F
+from torch.utils.data import DataLoader, TensorDataset
 
 #################################################################
 #               Ploty Plots Classes
@@ -489,3 +490,217 @@ def run_anomaly_detection_pipeline(df: pd.DataFrame,
     except Exception as e:
         print(f"Error during anomaly detection: {str(e)}")
         raise
+
+class TLEVAE(nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int = 32, latent_dim: int = 4):
+        super(TLEVAE, self).__init__()
+        
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim, hidden_dim//2),
+            nn.LayerNorm(hidden_dim//2),
+            nn.LeakyReLU(0.2)
+        )
+        
+        self.mean_layer = nn.Linear(hidden_dim//2, latent_dim)
+        self.logvar_layer = nn.Linear(hidden_dim//2, latent_dim)
+        
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim//2),
+            nn.LayerNorm(hidden_dim//2),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim//2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim, input_dim)
+        )
+        
+    def encode(self, x):
+        x = self.encoder(x)
+        mean = self.mean_layer(x)
+        logvar = self.logvar_layer(x)
+        return mean, logvar
+    
+    def reparameterize(self, mean, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mean + eps * std
+        
+    def decode(self, z):
+        return self.decoder(z)
+    
+    def forward(self, x):
+        mean, logvar = self.encode(x)
+        z = self.reparameterize(mean, logvar)
+        return self.decode(z), mean, logvar
+
+class TLEVariationalAnomalyDetector:
+    def __init__(self, input_dim: int, hidden_dim: int = 32, latent_dim: int = 4):
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.latent_dim = latent_dim
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = TLEVAE(input_dim, hidden_dim, latent_dim).to(self.device)
+        self.scaler = StandardScaler()
+
+    def save_model(self, path: str, NORAD_ID_NUM: int):
+        os.makedirs(path, exist_ok=True)
+        
+        torch.save({
+            'model_state': self.model.state_dict(),
+            'input_dim': self.input_dim,
+            'hidden_dim': self.hidden_dim,
+            'latent_dim': self.latent_dim
+        }, os.path.join(path, f'{NORAD_ID_NUM}_vae_model.pt'))
+        joblib.dump(self.scaler, os.path.join(path, f'{NORAD_ID_NUM}_vae_scaler.pkl'))
+        
+        print(f"VAE model saved to {path}")
+    
+    @classmethod
+    def load_model(cls, path: str, NORAD_ID_NUM: int) -> 'TLEVariationalAnomalyDetector':
+        checkpoint = torch.load(os.path.join(path, f'{NORAD_ID_NUM}_vae_model.pt'))
+        
+        detector = cls(input_dim=checkpoint['input_dim'],
+                     hidden_dim=checkpoint['hidden_dim'],
+                     latent_dim=checkpoint['latent_dim'])
+        
+        detector.model.load_state_dict(checkpoint['model_state'])
+        detector.scaler = joblib.load(os.path.join(path, f'{NORAD_ID_NUM}_vae_scaler.pkl'))
+        detector.model.eval()
+        
+        print(f"VAE model loaded from {path}")
+        return detector
+        
+    def loss_function(self, x, x_hat, mean, logvar):
+        recon_loss = nn.MSELoss(reduction='sum')(x_hat, x)
+        kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
+        
+        return recon_loss + kl_loss
+    
+    def train(self, data: np.ndarray, epochs: int = 150, batch_size: int = 32) -> List[float]:
+        print(f"Starting VAE training with data shape: {data.shape}")
+        scaled_data = self.scaler.fit_transform(data)
+        train_data = torch.FloatTensor(scaled_data).to(self.device)
+        
+        dataset = TensorDataset(train_data)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        
+        optimizer = optim.Adam(self.model.parameters())
+        losses = []
+
+        self.model.train()
+        
+        for epoch in range(epochs):
+            total_loss = 0
+            for batch_idx, (batch,) in enumerate(dataloader):
+                optimizer.zero_grad()
+                
+                x_hat, mean, logvar = self.model(batch)
+                
+                loss = self.loss_function(batch, x_hat, mean, logvar)
+                
+                loss.backward()
+                optimizer.step()
+                
+                total_loss += loss.item()
+            
+            avg_loss = total_loss / len(dataloader.dataset)
+            losses.append(avg_loss)
+            
+            if (epoch + 1) % 10 == 0:
+                print(f"Epoch [{epoch+1}/{epochs}], Loss: {avg_loss:.6f}")
+                
+        return losses
+    
+    def vae_detect_anomalies(self, data: np.ndarray, threshold_sigma: float = 2) -> Tuple[np.ndarray, Dict]:
+        print(f"Detecting anomalies using VAE in data with shape: {data.shape}")
+        scaled_data = self.scaler.transform(data)
+        test_data = torch.FloatTensor(scaled_data).to(self.device)
+        
+        self.model.eval()
+        with torch.no_grad():
+            x_hat, mean, logvar = self.model(test_data)
+            
+        reconstruction_errors = torch.abs(test_data - x_hat).cpu().numpy()
+        
+        error_mean = np.mean(reconstruction_errors, axis=0)
+        error_std = np.std(reconstruction_errors, axis=0)
+        error_std = np.where(error_std == 0, 1e-10, error_std)
+        z_scores = (reconstruction_errors - error_mean) / error_std
+        
+        anomalies = np.any(np.abs(z_scores) > threshold_sigma, axis=1)
+        
+        anomaly_details = {
+            'z_scores': z_scores,
+            'feature_anomalies': np.abs(z_scores) > threshold_sigma,
+            'reconstruction_errors': reconstruction_errors,
+            'latent_space': mean.cpu().numpy()  
+        }
+        
+        print(f"Found {np.sum(anomalies)} anomalous samples")
+        return anomalies, anomaly_details
+    
+    def explain_anomalies(self, anomaly_details: Dict, feature_names: List[str] = None) -> List[Dict]:
+        if feature_names is None:
+            feature_names = [f"Feature_{i}" for i in range(anomaly_details['z_scores'].shape[1])]
+        
+        if len(feature_names) != anomaly_details['z_scores'].shape[1]:
+            raise ValueError(f"Expected {anomaly_details['z_scores'].shape[1]} feature names, got {len(feature_names)}")
+            
+        print(f"Generating explanations for shape {anomaly_details['z_scores'].shape}")
+        explanations = []
+        
+        for i in range(len(anomaly_details['z_scores'])):
+            if np.any(anomaly_details['feature_anomalies'][i]):
+                anomalous_features = []
+                for j, is_anomaly in enumerate(anomaly_details['feature_anomalies'][i]):
+                    if is_anomaly:
+                        anomalous_features.append({
+                            'feature': feature_names[j],
+                            'z_score': float(anomaly_details['z_scores'][i, j]),  
+                            'reconstruction_error': float(anomaly_details['reconstruction_errors'][i, j])
+                        })
+                
+                if anomalous_features:
+                    explanations.append({
+                        'sample_index': int(i),  
+                        'anomalous_features': anomalous_features
+                    })
+                    
+        print(f"Generated {len(explanations)} anomaly explanations")
+        return explanations   
+
+def run_vae_anomaly_detection(df: pd.DataFrame, 
+                            feature_names: List[str] = None,
+                            hidden_dim: int = 32,
+                            latent_dim: int = 4,
+                            epochs: int = 150,
+                            batch_size: int = 32,
+                            model_path: str = None,
+                            should_train: bool = True,
+                            NORAD_ID_NUM: int = None):
+    
+    data = df.values
+    input_dim = data.shape[1]
+    
+    if should_train:
+        print("Training new VAE model...")
+        detector = TLEVariationalAnomalyDetector(input_dim=input_dim, 
+                                               hidden_dim=hidden_dim,
+                                               latent_dim=latent_dim)
+        losses = detector.train(data, epochs=epochs, batch_size=batch_size)
+        
+        if model_path:
+            detector.save_model(model_path, NORAD_ID_NUM)
+    else:
+        if not model_path:
+            raise ValueError("model_path must be provided when should_train=False")
+        print("Loading existing VAE model...")
+        detector = TLEVariationalAnomalyDetector.load_model(model_path, NORAD_ID_NUM)
+        losses = []
+    
+    anomalies, anomaly_details = detector.vae_detect_anomalies(data)
+    
+    return detector, anomalies, anomaly_details, losses
