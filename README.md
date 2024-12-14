@@ -11,15 +11,13 @@ Our analysis includes:
 
 ## Repository Structure
 
-### Data Files (`/dataout_HPC`)
+### Data Files (`/dataout_HPC & https://drive.google.com/drive/folders/107m_W9zvD3yVL7DjbPA4rmlVvP4kWwEM`)
 - `CIS_satcat.pkl`: SpaceTrack satellite catalog data for CIS-owned objects (~25K objects including debris)
-- `DEV_*.parquet`: TLE data & XYZ coordinates
 - `MODEL_*.parquet`: Combined data including:
   - TLE data
   - XYZ coordinates
   - SatCat information
   - UCS data
-- `model_test_train.parquet`: Complete dataset including outlier information
 
 ### Directories
 - `/output`: Testing and build output directory
